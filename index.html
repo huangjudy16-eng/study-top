@@ -1,0 +1,253 @@
+import { useState } from 'react';
+import { Upload, FileText, Image, X, Tag, Brain, Loader2, ChevronDown, ChevronUp, Plus } from 'lucide-react';
+import { base44 } from '@/api/base44Client';
+import { getStudyMaterials, saveStudyMaterials, getConceptTags, saveConceptTags } from '@/lib/storage';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+
+export default function StudyMaterials() {
+  const [materials, setMaterials] = useState(getStudyMaterials());
+  const [conceptTags, setConceptTags] = useState(getConceptTags());
+  const [uploading, setUploading] = useState(false);
+  const [analysing, setAnalysing] = useState(null);
+  const [expanded, setExpanded] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFiles = async (files) => {
+    setUploading(true);
+    const newMaterials = [];
+    for (const file of Array.from(files)) {
+      const reader = new FileReader();
+      const dataUrl = await new Promise(res => { reader.onload = e => res(e.target.result); reader.readAsDataURL(file); });
+      newMaterials.push({
+        id: Date.now() + Math.random(),
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        dataUrl,
+        uploadedAt: new Date().toISOString(),
+        concepts: null,
+        summary: null,
+      });
+    }
+    const updated = [...materials, ...newMaterials];
+    setMaterials(updated);
+    saveStudyMaterials(updated);
+    setUploading(false);
+  };
+
+  const analyseFile = async (material) => {
+    setAnalysing(material.id);
+    try {
+      const isImage = material.type.startsWith('image/');
+
+      let fileUrl = material.dataUrl;
+      if (isImage) {
+        const blob = await fetch(material.dataUrl).then(r => r.blob());
+        const file = new File([blob], material.name, { type: material.type });
+        const { file_url } = await base44.integrations.Core.UploadFile({ file });
+        fileUrl = file_url;
+      }
+
+      const prompt = isImage
+        ? `Analyse this academic document/image and extract key academic concepts, create a summary, and identify the main topics covered.`
+        : `Analyse this file: "${material.name}". Based on the filename and academic context, provide typical key concepts and a helpful study summary.`;
+
+      const result = await base44.integrations.Core.InvokeLLM({
+        prompt,
+        file_urls: isImage ? [fileUrl] : undefined,
+        response_json_schema: {
+          type: 'object',
+          properties: {
+            summary: { type: 'string' },
+            key_concepts: { type: 'array', items: { type: 'string' } },
+            main_topics: { type: 'array', items: { type: 'string' } },
+            difficulty_level: { type: 'string' },
+            recommended_study_time: { type: 'string' }
+          }
+        }
+      });
+
+      // Save concepts as tags
+      if (result.key_concepts?.length) {
+        const newTags = result.key_concepts.map(c => ({
+          id: Date.now() + Math.random(),
+          concept: c,
+          materialId: material.id,
+          materialName: material.name,
+          createdAt: new Date().toISOString(),
+        }));
+        const updatedTags = [...conceptTags, ...newTags];
+        setConceptTags(updatedTags);
+        saveConceptTags(updatedTags);
+      }
+
+      const updated = materials.map(m =>
+        m.id === material.id ? { ...m, ...result } : m
+      );
+      setMaterials(updated);
+      saveStudyMaterials(updated);
+      setExpanded(material.id);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAnalysing(null);
+    }
+  };
+
+  const deleteMaterial = (id) => {
+    const updated = materials.filter(m => m.id !== id);
+    setMaterials(updated);
+    saveStudyMaterials(updated);
+  };
+
+  const formatSize = (bytes) => {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / 1048576).toFixed(1) + ' MB';
+  };
+
+  return (
+    <div className="p-6 max-w-4xl mx-auto space-y-6">
+      <div>
+        <h2 className="text-xl font-bold">Study Materials</h2>
+        <p className="text-sm text-muted-foreground">Upload documents and images — AI will extract key concepts</p>
+      </div>
+
+      {/* Upload zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+        className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors ${
+          dragOver ? 'border-primary bg-primary/5' : 'border-border hover:border-primary hover:bg-primary/5 cursor-pointer'
+        }`}
+        onClick={() => document.getElementById('mat-upload')?.click()}
+      >
+        <Upload className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+        <p className="font-medium">Drop files here or click to upload</p>
+        <p className="text-sm text-muted-foreground mt-1">Images (for AI analysis), PDFs, documents</p>
+        <input id="mat-upload" type="file" multiple accept="image/*,.pdf,.doc,.docx,.txt" className="hidden" onChange={e => handleFiles(e.target.files)} />
+        {uploading && (
+          <div className="flex items-center justify-center gap-2 mt-3 text-primary">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            <span className="text-sm">Uploading...</span>
+          </div>
+        )}
+      </div>
+
+      {/* Materials list */}
+      {materials.length === 0 ? (
+        <div className="text-center py-12 text-muted-foreground">
+          <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p>No materials uploaded yet</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {materials.map(mat => (
+            <div key={mat.id} className="bg-white border border-border rounded-xl overflow-hidden">
+              <div className="flex items-center gap-3 p-4">
+                <div className="w-10 h-10 rounded-lg bg-secondary flex items-center justify-center flex-shrink-0">
+                  {mat.type?.startsWith('image/') ? (
+                    <img src={mat.dataUrl} alt={mat.name} className="w-10 h-10 object-cover rounded-lg" />
+                  ) : (
+                    <FileText className="w-5 h-5 text-muted-foreground" />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm truncate">{mat.name}</p>
+                  <p className="text-xs text-muted-foreground">{formatSize(mat.size)} · {new Date(mat.uploadedAt).toLocaleDateString()}</p>
+                  {mat.key_concepts && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {mat.key_concepts.slice(0, 3).map((c, i) => (
+                        <Badge key={i} variant="secondary" className="text-xs">{c}</Badge>
+                      ))}
+                      {mat.key_concepts.length > 3 && (
+                        <Badge variant="outline" className="text-xs">+{mat.key_concepts.length - 3}</Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {!mat.key_concepts && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => analyseFile(mat)}
+                      disabled={analysing === mat.id}
+                    >
+                      {analysing === mat.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <><Brain className="w-3.5 h-3.5 mr-1" /> Analyse</>
+                      )}
+                    </Button>
+                  )}
+                  {mat.key_concepts && (
+                    <button
+                      onClick={() => setExpanded(expanded === mat.id ? null : mat.id)}
+                      className="p-1.5 rounded-md hover:bg-secondary"
+                    >
+                      {expanded === mat.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </button>
+                  )}
+                  <button onClick={() => deleteMaterial(mat.id)} className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              {expanded === mat.id && mat.key_concepts && (
+                <div className="border-t border-border p-4 bg-secondary/30 space-y-3">
+                  {mat.summary && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-1">Summary</p>
+                      <p className="text-sm">{mat.summary}</p>
+                    </div>
+                  )}
+                  {mat.key_concepts?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Key Concepts</p>
+                      <div className="flex flex-wrap gap-2">
+                        {mat.key_concepts.map((c, i) => (
+                          <Badge key={i} className="bg-primary/10 text-primary border-0">{c}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {mat.main_topics?.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Main Topics</p>
+                      <div className="flex flex-wrap gap-2">
+                        {mat.main_topics.map((t, i) => (
+                          <Badge key={i} variant="outline">{t}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="flex gap-4 text-xs text-muted-foreground">
+                    {mat.difficulty_level && <span>Difficulty: <strong>{mat.difficulty_level}</strong></span>}
+                    {mat.recommended_study_time && <span>Study time: <strong>{mat.recommended_study_time}</strong></span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Concept Tags Summary */}
+      {conceptTags.length > 0 && (
+        <div className="bg-white border border-border rounded-xl p-4">
+          <h3 className="font-semibold mb-3 flex items-center gap-2">
+            <Tag className="w-4 h-4 text-primary" /> All Concept Tags ({conceptTags.length})
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {[...new Set(conceptTags.map(t => t.concept))].map((concept, i) => (
+              <Badge key={i} className="bg-violet-100 text-violet-700 border-0">{concept}</Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
