@@ -1,4 +1,32 @@
-import { useState } from 'react';
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Study Top</title>
+    <style>
+        /* 這裡可以加一點簡單的樣式，讓網頁不那麼空 */
+        body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+        .container { max-width: 800px; margin: auto; border: 1px solid #ccc; padding: 20px; border-radius: 8px; }
+        h1 { color: #333; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Study Materials</h1>
+        <p>AI will extract key concepts from your documents.</p>
+        
+        <div style="border: 2px dashed #007bff; padding: 40px; text-align: center;">
+            <input type="file" id="mat-upload">
+            <p>Drop files here or click to upload</p>
+        </div>
+
+        <div id="status">No materials uploaded yet.</div>
+    </div>
+
+    <script>
+        import { useState } from 'react';
 import { Upload, FileText, Image, X, Tag, Brain, Loader2, ChevronDown, ChevronUp, Plus } from 'lucide-react';
 import { base44 } from '@/api/base44Client';
 import { getStudyMaterials, saveStudyMaterials, getConceptTags, saveConceptTags } from '@/lib/storage';
@@ -251,3 +279,9 @@ export default function StudyMaterials() {
       )}
     </div>
   );
+}
+        console.log("網頁已載入");
+    </script>
+</body>
+</html>
+
